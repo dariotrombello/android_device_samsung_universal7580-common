@@ -6,24 +6,23 @@ import init.power.rc
 import init.target.rc
 
 on early-init
-    mount debugfs /sys/kernel/debug /sys/kernel/debug mode=755
+    mount debugfs /sys/kernel/debug /sys/kernel/debug
 
 on init
     mkdir /preload 0771 system system
-
-    # RIL <-> audioserver comm
-    chmod 0644 /proc/cmdline
 
     # See storage config details at http://source.android.com/tech/storage/
     mkdir /mnt/shell/emulated 0700 shell shell
     mkdir /storage/emulated 0555 root root
 
-    # CPUSETS permission
-    chmod 0660 /dev/cpuctl
-    # Support legacy paths
-    symlink /sdcard /storage/sdcard0
-    symlink /storage/usbdisk /mnt/usbdisk
+    #export EXTERNAL_STORAGE /storage/emulated/legacy
+    #export EMULATED_STORAGE_SOURCE /mnt/shell/emulated
+    #export EMULATED_STORAGE_TARGET /storage/emulated
 
+    # Support legacy paths
+    symlink /sdcard /mnt/sdcard
+
+    #export SECONDARY_STORAGE /storage/extSdCard
     export EXTERNAL_STORAGE /sdcard
 
     symlink /data/app /factory
@@ -55,6 +54,20 @@ on post-fs-data
     chmod 0664 /sys/class/voice_trigger/dbd2/va_load_amodel
     mkdir /data/firmware 0770 audioserver system
     chown audioserver system /data/firmware
+
+    # create data/gps for GPS daemon
+    chown root system /dev/ttySAC0
+    chmod 0660 /dev/ttySAC0
+    chown root system /sys/class/sec/gps/GPS_PWR_EN/value
+    chmod 0664 /sys/class/sec/gps/GPS_PWR_EN/value
+    mkdir /data/system 0771 system system
+    chown system system /data/system
+    mkdir /data/system/gps 0771 system system
+    chown system system /data/system/gps
+    rm /data/system/gps/gps_started
+    rm /data/system/gps/glonass_started
+    rm /data/system/gps/smd_started
+    rm /data/system/gps/sv_cno.info
 
 on boot
     # Allow to access debugfs
@@ -122,18 +135,6 @@ on boot
     chmod 0660 /sys/devices/system/cpu/cpu0/cpufreq/interactive/freq_max
     chown system system /sys/devices/system/cpu/cpu0/cpufreq/interactive/freq_min
     chmod 0660 /sys/devices/system/cpu/cpu0/cpufreq/interactive/freq_min
-
-    # change permissions for all cpusets we touch at runtime
-    chown system system /dev/cpuset/cpus
-    chown system system /dev/cpuset/foreground/cpus
-    chown system system /dev/cpuset/background/cpus
-    chown system system /dev/cpuset/system-background/cpus
-    chown system system /dev/cpuset/top-app/cpus
-    chmod 0664 /dev/cpuset/cpus
-    chmod 0664 /dev/cpuset/foreground/cpus
-    chmod 0664 /dev/cpuset/background/cpus
-    chmod 0664 /dev/cpuset/system-background/cpus
-    chmod 0664 /dev/cpuset/top-app/cpus
 
     # Change permissions of the CPU online settings
     chown system system /sys/devices/system/cpu/cpu0/online
@@ -236,10 +237,6 @@ on boot
     chown system system /dev/ttyGS2
     chown system system /dev/ttyGS3
 
- # tdmb
-    chown system system /dev/tdmb
-    chmod 0660 /dev/tdmb
-
 # IPSec for VOLTE
     chown root system /dev/socket
     chmod 0775 /dev/socket
@@ -279,8 +276,7 @@ on fs
     mkdir /persdata/absolute 0750 system system
 
     wait /dev/block/platform/13540000.dwmmc0/by-name/PERSDATA
-    exec /system/bin/e2fsck -p /dev/block/platform/13540000.dwmmc0/by-name/PERSDATA
-    mount ext4 /dev/block/platform/13540000.dwmmc0/by-name/PERSDATA /persdata/absolute nosuid nodev barrier=1
+    mount ext4 /dev/block/platform/13540000.dwmmc0/by-name/PERSDATA /persdata/absolute nosuid nodev noatime noauto_da_alloc,discard,journal_async_commit,errors=panic
 
     chown system system /persdata
     chmod 0755 /persdata
@@ -299,28 +295,12 @@ on fs
     chown system radio /sys/class/sec/sec_touchkey/flip_mode
     chown system system /sys/class/sec/sec_touchkey/input/enabled
 
-# Permissions for DT2W
-    chown system system /sys/android_touch/doubletap2wake
-
 # Permissions for gpio_keys
     chown radio system /sys/class/sec/sec_key/wakeup_keys
     write /sys/class/sec/sec_key/wakeup_keys 116,172
+
 # Fingerprint
     mkdir /dev/validity 0770 system system
-
- # create data/gps for GPS daemon
-    chown root system /dev/ttySAC0
-    chmod 0660 /dev/ttySAC0
-    chown root system /sys/class/sec/gps/GPS_PWR_EN/value
-    chmod 0664 /sys/class/sec/gps/GPS_PWR_EN/value
-    mkdir /data/system 0771 system system
-    chown system system /data/system
-    mkdir /data/system/gps 0771 system system
-    chown system system /data/system/gps
-    rm /data/system/gps/gps_started
-    rm /data/system/gps/glonass_started
-    rm /data/system/gps/smd_started
-    rm /data/system/gps/sv_cno.info
 
 # MTP permission
     chmod 0660 /dev/usb_mtp_gadget
@@ -811,7 +791,7 @@ on fs
 service gpsd /system/bin/gpsd -c /system/etc/gps.xml
     class main
     user gps
-    group system wakelock inet net_raw
+    group system inet net_raw wakelock
     ioprio be 0
 
 # Set watchdog timer to 30 seconds and pet it every 10 seconds to get a 20 second margin
@@ -839,14 +819,6 @@ service charger /charger
     critical
     seclabel u:r:charger:s0
 
-on charger
-    # Set cpu governor to powersave while in charging mode
-    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor powersave
-    write /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor powersave
-    write /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor powersave
-    write /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor powersave
-
-
 # DRK/CS service
 service cs_service /system/bin/cs
     class main
@@ -858,6 +830,7 @@ on property:sys.mobicoredaemon.enable=true
     start cs_service
     write /proc/iccc_ready 1
 
+# SSWAP
 service sswap /system/bin/sswap -s -f 1024
       class core
       user root
